@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import sys
 import threading
 import time
 import urllib.request
@@ -76,7 +77,32 @@ def query_paseo(spec: dict) -> list[dict]:
             for row in rows if isinstance(row, dict) and isinstance(row.get('id'), str)]
 
 
-PROBE_TYPES = {'paseo_provider': query_paseo, 'openai_compatible': query_proxy,
+NATIVE_CLIS = {'claude': 'claude', 'codex': 'codex', 'grok': 'grok',
+               'antigravity': 'agy', 'antigravity-resilient': 'agy'}
+
+
+def query_native(spec: dict) -> list[dict]:
+    family = spec.get('harness') or spec['provider']
+    family = 'antigravity-resilient' if family == 'antigravity' else family
+    binary = shutil.which(NATIVE_CLIS[family])
+    if not binary:
+        raise RuntimeError('Native CLI unavailable')
+    env = dict(os.environ)
+    # Model listing must not inherit the coordinator's session identity.
+    for key in ('CLAUDECODE', 'CLAUDE_SESSION_ID', 'CODEX_THREAD_ID', 'CODEX_SESSION_ID'):
+        env.pop(key, None)
+    result = owned_process.run([sys.executable, str(Path(__file__).with_name('native_model_probe.py')), family, binary],
+                               timeout=QUERY_TIMEOUT, output_limit=2 * 1024 * 1024, env=env,
+                               cwd=str(Path.home()))
+    if result.returncode:
+        raise RuntimeError('Native model discovery unavailable')
+    rows = json.loads(result.stdout)
+    if not isinstance(rows, list) or not rows:
+        raise ValueError('Invalid native model list')
+    return rows
+
+
+PROBE_TYPES = {'native_cli': query_native, 'paseo_provider': query_paseo, 'openai_compatible': query_proxy,
                'static': lambda spec: spec.get('configured_models') or []}
 PASEO_HARNESSES = {'claude', 'codex', 'pi', 'omp', 'dsh', 'copilot', 'muse', 'opencode', 'grok', 'antigravity-resilient'}
 
@@ -91,6 +117,7 @@ def probe_definition(provider: str, definition: dict | None = None) -> dict:
     sub = spec.get('litellm') if isinstance(spec.get('litellm'), dict) else {}
     endpoint = spec.get('endpoint') or spec.get('base_url') or sub.get('endpoint') or sub.get('base_url')
     spec.setdefault('type', 'openai_compatible' if endpoint else
+                    'native_cli' if provider in NATIVE_CLIS and not (os.environ.get('PASEO_CLI') or shutil.which('paseo')) else
                     'paseo_provider' if spec.get('harness', provider) in PASEO_HARNESSES else 'static')
     if not isinstance(spec['type'], str) or spec['type'] not in PROBE_TYPES:
         spec['type'] = 'unsupported'

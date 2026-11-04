@@ -1171,18 +1171,19 @@ def harness_model_rows() -> list[dict]:
     for owner, spec in table.items():
         for bid, bundle in (spec.get("bundles") or {}).items():
             account = allocator.accounts_override.preference_account(bundle, owner, accounts)
-            if inventory and (inventory.get(account) or {}).get("status") != "ready":
+            if inventory and (inventory.get(account) or {}).get("status") not in ("ready", "quota_exhausted"):
                 continue
             provider = bundle.get("provider") or owner
             launcher = ((accounts.get("_discovery") or {}).get("launchers") or {}).get(provider)
-            if launcher and launcher.get("status") != "ready":
+            if launcher and launcher.get("status") not in ("ready", "quota_exhausted"):
                 continue
             harness = allocator.accounts_override.harness(bundle, owner, bid, allocator.bundle_harness)
             model = allocator.canonical(bundle.get("model") or bid, accounts)
             groups.setdefault((account, harness), {}).setdefault(model, []).append((owner, bid, bundle))
     rows = []
     for (account, harness), models in groups.items():
-        if not any(not bundle.get("discovery_unavailable") for entries in models.values() for _, _, bundle in entries):
+        if ((inventory.get(account) or {}).get("status") != "quota_exhausted"
+                and not any(not bundle.get("discovery_unavailable") for entries in models.values() for _, _, bundle in entries)):
             continue
         spec = table.get(account) or {}
         host_enabled = bool(allocator.host_policy.account_allowed(policy, account))
@@ -1210,7 +1211,7 @@ def harness_model_rows() -> list[dict]:
     present = {row['account'] for row in rows}
     for account, spec in table.items():
         inv = inventory.get(account) or {}
-        if account not in present and inv.get('models') and inv.get('status') == 'ready':
+        if account not in present and inv.get('models') and inv.get('status') in ('ready', 'quota_exhausted'):
             family = inv.get('family') or account
             rows.append({'account': account, 'account_label': account_label(account), 'harness': family,
                 'harness_label': HARNESS_LABELS.get(family, family), 'plan': spec.get('plan'),

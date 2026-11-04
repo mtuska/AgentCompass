@@ -60,7 +60,10 @@ def test_initial_probe_failure_is_cached_until_retry_interval(tmp_path):
 
 def test_probe_registry_dispatch_defaults_and_explicit_static_override():
     assert model_catalog.probe_definition('custom', {'base_url': 'https://example.invalid'})['type'] == 'openai_compatible'
-    assert model_catalog.probe_definition('codex')['type'] == 'paseo_provider'
+    with mock.patch.object(model_catalog.shutil, 'which', return_value=None), mock.patch.dict(model_catalog.os.environ, {'PASEO_CLI': ''}):
+        assert model_catalog.probe_definition('codex')['type'] == 'native_cli'
+    with mock.patch.object(model_catalog.shutil, 'which', return_value='/bin/paseo'):
+        assert model_catalog.probe_definition('codex')['type'] == 'paseo_provider'
     assert model_catalog.probe_definition('remote-bot')['type'] == 'static'
     definition = {'endpoint': 'https://example.invalid', 'model_probe': 'static',
                   'configured_models': [{'id': 'one', 'label': 'One'}]}

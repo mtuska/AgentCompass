@@ -446,6 +446,9 @@ class PanelTests(unittest.TestCase):
         ])
         self.assertEqual(panel.cli_status.get(), 'CLI：2 已安装 · 0 可更新')
         panel.show('plugins')
+        if sys.platform != 'win32':
+            self.assertFalse(hasattr(panel, 'plugins_update_button'))  # Windows-only integration page
+            return
         self.assertEqual(panel.plugins_update_button.cget('text'), '检查更新')
         self.assertEqual(panel.plugins_progress_button.cget('text'), '更新进度')
         self.assertEqual(panel.plugins_log_button.cget('text'), '更新日志')
