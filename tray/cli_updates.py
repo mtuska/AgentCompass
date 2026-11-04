@@ -20,6 +20,7 @@ from i18n import translate as _tr
 import json
 from contextlib import ExitStack
 import os
+import desktop_platform
 import re
 import shutil
 import threading
@@ -711,7 +712,7 @@ def open_log() -> str:
             return update_status.open_log(state_dir())
         except Exception:
             return _tr("日志不存在：{0}").format(path)
-    os.startfile(path)
+    desktop_platform.open_path(path)
     return _tr("已打开日志 {0}").format(path.name)
 
 

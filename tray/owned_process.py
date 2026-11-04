@@ -159,8 +159,11 @@ def _run_job(argv, timeout, env, cwd, output_limit=OUTPUT_LIMIT) -> Result:
 
 def _run_group(argv, timeout, env, cwd, output_limit=OUTPUT_LIMIT) -> Result:
     with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
-        proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=out, stderr=err, env=env, cwd=cwd,
-                                start_new_session=True)
+        try:
+            proc = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=out, stderr=err, env=env, cwd=cwd,
+                                    start_new_session=True)
+        except OSError as exc:
+            return Result(127, "", str(exc))
 
         def alive() -> bool:
             try:

@@ -101,4 +101,5 @@ def stage(root: Path, dest: Path | None = None) -> Path:
     dest.mkdir(parents=True, exist_ok=True)
     copy_skills(root / "skills", dest / "skills")
     copy_setup(root / "setup", dest / "setup")
+    copy_skills(root / "tray", dest / "tray")
     return dest

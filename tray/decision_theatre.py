@@ -347,12 +347,15 @@ def shown_candidates(scene, count=5):
 def font(size, bold=False):
     names = ("C:/Windows/Fonts/msyhbd.ttc" if bold else "C:/Windows/Fonts/msyh.ttc",
              "DejaVuSans-Bold.ttf" if bold else "DejaVuSans.ttf")
+    system_font = theme.system_font_path(bold)
+    if system_font:
+        names = (system_font, *names)
     for name in names:
         try:
             return ImageFont.truetype(name, max(8, size))
         except OSError:
             pass
-    return ImageFont.load_default()
+    return ImageFont.load_default(size=max(8, size))
 
 
 def hash01(i):

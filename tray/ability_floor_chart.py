@@ -141,6 +141,9 @@ def _load_font(kind: str, size: int):
     else:
         # Use Microsoft YaHei first even for numeric/mixed labels so CJK + numbers render with zero missing-glyph boxes.
         candidates = ("msyh.ttc", "segoeui.ttf", "consola.ttf", "arial.ttf")
+    system_font = theme.system_font_path(kind == "bold")
+    if system_font:
+        candidates = (system_font, *candidates)
     font = None
     for name in candidates:
         try:
@@ -149,7 +152,7 @@ def _load_font(kind: str, size: int):
         except OSError:
             continue
     if font is None:
-        font = ImageFont.load_default()
+        font = ImageFont.load_default(size=size)
     _FONT_CACHE[key] = font
     return font
 

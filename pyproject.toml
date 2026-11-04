@@ -22,7 +22,7 @@ dependencies = []
 
 [project.optional-dependencies]
 venice = ["openai>=1.0"]
-tray = ["psutil", "pystray", "Pillow", "pywin32"]
+tray = ["psutil", "Pillow>=10.1", "pystray; sys_platform == 'win32'", "pywin32; sys_platform == 'win32'", "PySide6-Essentials>=6.8,<7; sys_platform == 'linux'"]
 
 [project.urls]
 Homepage = "https://github.com/akiiwa-games/AgentCompass"
@@ -31,6 +31,7 @@ Releases = "https://github.com/akiiwa-games/AgentCompass/releases"
 
 [project.scripts]
 agentcompass = "agentcompass.cli:main"
+agentcompass-tray = "agentcompass.desktop:main"
 
 [tool.hatch.version]
 path = "agentcompass/__init__.py"

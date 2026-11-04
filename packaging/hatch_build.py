@@ -22,6 +22,8 @@ class CustomBuildHook(BuildHookInterface):
         if self.target_name == "sdist":
             build_data["force_include"][str(staged / "skills")] = "skills"
             build_data["force_include"][str(staged / "setup")] = "setup"
+            build_data["force_include"][str(staged / "tray")] = "tray"
             return
+        build_data["force_include"][str(staged / "tray")] = "agentcompass/data/tray"
         build_data["force_include"][str(staged / "skills")] = "agentcompass/data/skills"
         build_data["force_include"][str(staged / "setup")] = "agentcompass/data/setup"

@@ -46,7 +46,7 @@ def frozen() -> bool:
 def tray_command(*args: str) -> list[str]:
     if frozen():
         return [sys.executable, *args]
-    return [str(Path(sys.executable).with_name("pythonw.exe")),
+    return [str(Path(sys.executable).with_name("pythonw.exe")) if os.name == "nt" else sys.executable,
             str(Path(__file__).with_name("app.pyw")), *args]
 
 
@@ -90,7 +90,7 @@ def command(script: str | Path, *args: str, windowed: bool = True) -> list[str]:
     if frozen():
         return [sys.executable, FLAG, name, *args]
     python = Path(sys.executable)
-    if windowed:
+    if windowed and os.name == "nt":
         python = python.with_name("pythonw.exe")
     path = Path(script) if Path(script).suffix else Path(__file__).resolve().parent / f"{name}.py"
     return [str(python), str(path), *args]

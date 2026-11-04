@@ -11,6 +11,7 @@ from i18n import translate as _tr, LocalizedSequence, tr
 import contextlib
 import ctypes
 import os
+import desktop_platform
 import queue
 import subprocess
 import sys
@@ -49,6 +50,12 @@ AUTO_REPLAY_ROWS = 5  # newest ledger rows tried for the opening decision; legac
 def open_window(page: str | None = None) -> None:
     """Raise the panel if it is open, else start it in its own process; never blocks the caller."""
     global _process
+    if sys.platform != "win32":
+        if _process is None or _process.poll() is not None:
+            _process = subprocess.Popen(component_launch.command(__file__, *(["--page", page] if page else [])))
+        else:
+            (Path.home() / ".agent-compass/linux-dashboard-raise").touch()
+        return
     import win32con
     import win32gui
 
@@ -2946,7 +2953,7 @@ class Panel:
         self.build_version_card(frame)
         box = theme.card(frame, padding=14, fill="x")
         box.columnconfigure(1, weight=1)
-        rows = ((_tr("开机自启"), _tr("AgentCompass 随 Windows 启动")), (_tr("宿主 Skill"), _tr("Claude / Codex 的 agent-compass 链接")),
+        rows = ((_tr("开机自启"), _tr("AgentCompass 随 Windows 启动") if sys.platform == "win32" else "Start AgentCompass at desktop login"), (_tr("宿主 Skill"), _tr("Claude / Codex 的 agent-compass 链接")),
                 (_tr("Dot 中转库"), _tr("GitHub 仓库 owner/name")))
         for row, (title, hint) in enumerate(rows):
             if row:
@@ -2980,6 +2987,9 @@ class Panel:
         self.load_system(skip_fast=self._system_prefilled)
 
     def build_version_card(self, frame):
+        if sys.platform != "win32":
+            self.ttk.Label(frame, text="AgentCompass · Linux desktop", style="H2.TLabel").pack(anchor="w", pady=(0, 12))
+            return
         import updates
 
         tk, ttk = self.tk, self.ttk
@@ -3244,6 +3254,8 @@ class Panel:
             return {"config_error": _tr('读取失败：{0}').format(f'{exc}')}
 
     def _read_version_safe(self, network: bool = False):
+        if sys.platform != "win32":
+            return {"ok": True, "display_version": "AgentCompass · Linux desktop"}
         import updates
 
         try:
@@ -3265,7 +3277,10 @@ class Panel:
             self.ac_version_loaded(value[2])
 
     def load_system(self, skip_fast: bool = False):
-        import deploy
+        if sys.platform == "win32":
+            import deploy
+        else:
+            import desktop_platform as deploy
 
         if skip_fast:
             self.run(
@@ -3284,7 +3299,10 @@ class Panel:
         self._system_fast_loaded(value[1:])
 
     def toggle_tray_autostart(self):
-        import deploy
+        if sys.platform == "win32":
+            import deploy
+        else:
+            import desktop_platform as deploy
 
         on = bool(self.autostart_var.get())
 
@@ -3297,7 +3315,10 @@ class Panel:
         self.run(work, self.say())
 
     def sync_host_skills(self):
-        import deploy
+        if sys.platform == "win32":
+            import deploy
+        else:
+            import desktop_platform as deploy
 
         self.run(lambda: "；".join(deploy.link_skills() or [_tr("宿主 Skill 链接均已就绪")]), self.say())
 
@@ -3459,6 +3480,10 @@ class Panel:
         self.plugins_updating = False
 
     def build_plugins(self, page):
+        if sys.platform != "win32":
+            self.ttk.Label(page, text="Optional service integrations", style="H2.TLabel").pack(anchor="w")
+            self.ttk.Label(page, text="The Windows service bridges have not been ported to Linux.\nRouting, quota collection, history and model settings work independently.", wraplength=650).pack(anchor="w", pady=16)
+            return
         tk, ttk = self.tk, self.ttk
         self.header(page, _tr("外部集成"), (
             (_tr("重启服务"), self.restart_services, "Small.TButton"),
@@ -3553,7 +3578,7 @@ class Panel:
             def open_log():
                 if not Path(path).exists():
                     return _tr('日志不存在：{0}').format(f'{path}')
-                os.startfile(path)
+                desktop_platform.open_path(path)
                 return _tr('已打开日志 {0}').format(f'{Path(path).name}')
             return open_log
         start = lambda: services.plugin_start(plugin_id)
@@ -3651,6 +3676,8 @@ class Panel:
                  _tr('{0} 随托盘自启：{1}').format(f'{plugins.BY_ID[plugin_id].name}', f"{(_tr('开') if value else _tr('关'))}"))
 
     def load_plugins(self, probe=True):
+        if sys.platform != "win32":
+            return
         import services
 
         if probe:
@@ -3848,6 +3875,21 @@ def main() -> None:
     page = sys.argv[sys.argv.index("--page") + 1] if "--page" in sys.argv[:-1] else "scoring"
     root = tk.Tk()
     root.withdraw()
+    if sys.platform.startswith("linux"):
+        raise_request = Path.home() / ".agent-compass/linux-dashboard-raise"
+        def raise_window():
+            try:
+                requested = raise_request.exists()
+                if requested:
+                    raise_request.unlink(missing_ok=True)
+            except OSError:
+                requested = False
+            if requested:
+                root.deiconify()
+                root.lift()
+                root.focus_force()
+            root.after(150, raise_window)
+        root.after(150, raise_window)
     try:
         Panel(root, page)
         root.update_idletasks()

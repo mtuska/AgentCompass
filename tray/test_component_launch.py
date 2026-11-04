@@ -11,7 +11,7 @@ class CommandTests(unittest.TestCase):
         with mock.patch.object(launch, "frozen", return_value=False), \
                 mock.patch.object(launch.sys, "executable", "C:/Python/python.exe"):
             self.assertEqual(launch.command("E:/repo/tray/router_window.py", "--page", "x"),
-                             [str(Path("C:/Python/pythonw.exe")), str(Path("E:/repo/tray/router_window.py")), "--page", "x"])
+                             [str(Path("C:/Python/pythonw.exe" if launch.os.name == "nt" else "C:/Python/python.exe")), str(Path("E:/repo/tray/router_window.py")), "--page", "x"])
             self.assertEqual(launch.command("E:/repo/tray/capacity_stats.py", windowed=False),
                              [str(Path("C:/Python/python.exe")), str(Path("E:/repo/tray/capacity_stats.py"))])
             bare = launch.command("network_status")

@@ -5,6 +5,7 @@ from i18n import translate as _tr
 
 import json
 import os
+import desktop_platform
 from pathlib import Path
 import subprocess
 import sys
@@ -87,12 +88,16 @@ def open_log(directory: Path | None = None) -> str:
             log_path = cli_log
         else:
             log_path.write_text("", encoding="utf-8")
-    os.startfile(log_path)
+    desktop_platform.open_path(log_path)
     return _tr("已打开日志 {0}").format(log_path.name)
 
 
 def open_window() -> None:
     global _process
+    if os.name != "nt":
+        if _process is None or _process.poll() is not None:
+            _process = subprocess.Popen(component_launch.command(__file__))
+        return
     import win32con
     import win32gui
 

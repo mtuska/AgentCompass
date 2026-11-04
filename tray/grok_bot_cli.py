@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import os
+import desktop_platform
 from pathlib import Path
 import shutil
 import subprocess
@@ -113,7 +114,7 @@ def check():
 def guide():
     if not GUIDE.is_file():
         return frozen_message()
-    os.startfile(GUIDE)
+    desktop_platform.open_path(GUIDE)
     return _tr('已打开 Grok Bot CLI 使用说明。')
 
 

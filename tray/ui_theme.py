@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import logging
+from functools import lru_cache
 import os
 from pathlib import Path
 import sys
@@ -40,8 +41,8 @@ CYAN = "#06B6D4"
 CYAN_SOFT = "#ECFEFF"
 SELECTED = "#E0E7FF"
 
-FONT = "Microsoft YaHei UI"
-MONO = "Cascadia Mono"
+FONT = "Microsoft YaHei UI" if sys.platform == "win32" else "Liberation Sans"
+MONO = "Cascadia Mono" if sys.platform == "win32" else "Liberation Mono"
 
 FACTOR = 1.0  # screen pixels per 96-dpi pixel, set by apply()
 
@@ -73,7 +74,11 @@ def mono_font(root) -> str:
     try:
         from tkinter import font
 
-        return MONO if MONO in font.families(root) else "Consolas"
+        families = {name.lower() for name in font.families(root)}
+        for candidate in (MONO, "DejaVu Sans Mono", "Liberation Mono", "Consolas", "fixed"):
+            if candidate.lower() in families:
+                return candidate
+        return "TkFixedFont"
     except Exception:
         return "Consolas"
 
@@ -337,3 +342,18 @@ def dpi_aware() -> None:
         ctypes.windll.shcore.SetProcessDpiAwareness(1)
     except Exception:
         pass
+
+
+@lru_cache(maxsize=2)
+def system_font_path(bold=False):
+    """Resolve a Linux font once for Pillow, which does not consult fontconfig."""
+    if not sys.platform.startswith("linux"):
+        return None
+    import subprocess
+    try:
+        result = subprocess.run(["fc-match", "-f", "%{file}", "sans:weight=bold" if bold else "sans"],
+                                capture_output=True, text=True, timeout=3, check=True)
+        path = result.stdout.strip()
+        return path if Path(path).is_file() else None
+    except (OSError, subprocess.SubprocessError):
+        return None

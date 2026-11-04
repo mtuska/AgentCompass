@@ -1160,6 +1160,7 @@ class ResetEditorTests(unittest.TestCase):
             save.assert_called_once_with('codex', 'gpt-6-astra', hours=1)
 
 
+@unittest.skipUnless(sys.platform == "win32", "Windows installer update controls")
 class SystemVersionCardTests(unittest.TestCase):
     def test_system_settings_shows_version_mismatch_update_available_and_one_click_update(self):
         import router_window
@@ -1211,3 +1212,14 @@ class SystemVersionCardTests(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+# UI defaults must not depend on the developer's saved language preference.
+import pytest
+
+@pytest.fixture(autouse=True)
+def isolated_ui_language(tmp_path, monkeypatch, request):
+    import i18n
+    if request.cls is LanguageTests:
+        return
+    monkeypatch.setattr(i18n, "settings_path", lambda: tmp_path / "ui-settings.json")

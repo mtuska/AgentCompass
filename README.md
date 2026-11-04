@@ -20,6 +20,11 @@ A deterministic **multi-agent task router and subscription quota scheduler** for
 it dispatches a **worker per task**: a `model × effort` bundle that clears the ability floor, spends quota that is about
 to expire, rotates workers at 2M context tokens, and is enforced by a `PreToolUse` spawn gate.
 
+## Linux desktop (this fork)
+
+A native KDE/StatusNotifier tray and the existing dashboard are available on Linux.
+See [build and installation instructions](docs/linux-desktop.md). The portable router remains unchanged.
+
 ## Quickstart
 
 ```bash

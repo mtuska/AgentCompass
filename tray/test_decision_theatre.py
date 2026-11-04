@@ -426,3 +426,12 @@ def test_two_line_title_grows_upward_and_everything_follows_the_block():
     # Ink specks are seeded from both lines.
     seeds=[seed for seed,*_ in two.ink]
     assert min(y for _,y in seeds)<two.title_at[1]<max(y for _,y in seeds)
+
+
+# Keep rendering expectations independent of a user's desktop language setting.
+import pytest
+
+@pytest.fixture(autouse=True)
+def isolated_ui_language(tmp_path, monkeypatch):
+    import i18n
+    monkeypatch.setattr(i18n, 'settings_path', lambda: tmp_path / 'ui-settings.json')
