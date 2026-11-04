@@ -204,12 +204,16 @@ class DecisionBindingTests(unittest.TestCase):
                 mock.patch.object(router_window.theme, 'set_window_icon'):
             panel = router_window.Panel(root, 'scoring')
             panel.plan_loaded(PLAN)
+            self.assertFalse(panel.theatre_enabled.get())
+            self.assertTrue(panel.radar.canvas.pack_info())
+            panel.theatre_enabled.set(True)
+            panel.toggle_theatre()
             self.assertEqual(panel.theatre.scene.winner.id,'opus')
             self.assertTrue(panel.verdict_strip.canvas.grid_info())
             self.assertIn('Opus 5.5',panel.verdict.get())
             panel.theatre_enabled.set(False)
             panel.toggle_theatre()
-            self.assertEqual(panel.theatre.elapsed,decision_theatre.DURATION)
+            self.assertEqual(panel.theatre.canvas.winfo_manager(), "")
             panel.render_radar()
             self.assertTrue(panel.radar.canvas.pack_info())
             self.assertEqual(panel.theatre.canvas.winfo_manager(), "")
@@ -230,7 +234,8 @@ class DecisionBindingTests(unittest.TestCase):
             panel.ledger_loaded(rows)
         self.assertEqual(panel.ledger_table.selection(), ("1",))
         self.assertIs(panel.plan_result, PLAN)
-        self.assertEqual(panel.theatre.scene.winner.id, 'opus')
+        self.assertTrue(panel.radar.canvas.pack_info())
+        self.assertEqual(len(panel.radar.axes), 5)
         self.assertTrue(panel._suppress_next_select)
 
     def test_breakdown_rows_carry_bonus_penalty_and_hard_gate_reasons(self):
@@ -682,7 +687,7 @@ class LanguageTests(unittest.TestCase):
         i18n.set_language("en")
         self.assertEqual([p[1] for p in router_window.PAGES],
                          ["Decision Compass", "Quota Monitor", "Model Settings", "Integrations"])
-        self.assertEqual(radar_chart.DNA_AXES[0][1], "Divergence")
+        self.assertEqual(radar_chart.DNA_AXES[0][1], "Creative Exploration")
         self.assertEqual(radar_chart.DNA_AXES[3][1], "Vision & Tools")
         self.assertEqual(radar_chart.axis_title(), "Capabilities & Quota")
         self.assertIn("divergence:", radar_chart.SCORE_AXES[0][2])
@@ -777,7 +782,7 @@ class LanguageTests(unittest.TestCase):
             self.assertIn('Sol 6.1 · High', panel.pick_a.cget('values'))
             self.assertEqual(panel.breakdown_row_tip('2'), 'sol · a')
             self.assertNotIn('ledger', panel.status.get())
-            self.assertEqual(panel.radar.axes[0][1], "Divergence")
+            self.assertEqual(panel.radar.axes[0][1], "Creative Exploration")
             self.assertEqual(panel.radar_title.cget("text"), "Capabilities & Quota")
             self.assertFalse(hasattr(panel, "mode_switch"))
             for page in ("quota", "plugins", "policy"):

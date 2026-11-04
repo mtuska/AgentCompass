@@ -389,10 +389,14 @@ class RadarChartCanvas:
             text_item = c.create_text(
                 x, y, text=label,
                 anchor=text_anchor, justify="center" if is_en() else ("right" if anchor == "e" else "left"),
-                width=px(108) if is_en() else 0,
-                fill=theme.INK, font=(theme.FONT, 9, "bold"))
+                width=px(140 if canvas_w >= px(600) else 108) if is_en() else 0,
+                fill=theme.INK, font=(theme.FONT, 11 if canvas_w >= px(600) else 9, "bold"))
             box = c.bbox(text_item)
             if box:
+                if box[1] < px(4):
+                    shift = px(4) - box[1]
+                    c.move(text_item, 0, shift)
+                    y += shift
                 if box[0] < px(4):
                     c.move(text_item, px(4) - box[0], 0)
                 elif box[2] > canvas_w - px(4):

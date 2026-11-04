@@ -8,6 +8,7 @@ from __future__ import annotations
 
 from i18n import translate as _tr, LocalizedSequence, tr
 
+import json
 import contextlib
 import ctypes
 import os
@@ -835,15 +836,22 @@ class Panel:
         self.radar_source.pack(anchor="w", pady=(2, 8))
         theatre_controls = ttk.Frame(radar_card, style="Card.TFrame")
         theatre_controls.pack(fill="x", pady=(0, 4))
-        self.theatre_enabled = tk.BooleanVar(value=True)
+        self.theatre_enabled = tk.BooleanVar(value=False)
         ttk.Checkbutton(theatre_controls, text=_tr("动画"), variable=self.theatre_enabled,
                         command=self.toggle_theatre).pack(side="right")
-        replay = ttk.Button(theatre_controls, text="↻", style="Tiny.TButton", width=3,
-                            command=self.replay_theatre)
+        replay = ttk.Button(theatre_controls, text=tr("重播", "Replay"), style="Tiny.TButton",
+                            command=lambda: self.replay_theatre(force=True))
         replay.pack(side="right", padx=(0, 5))
+        ttk.Button(theatre_controls, text=tr("展开图表", "Expand chart"), style="Tiny.TButton",
+                   command=self.expand_chart).pack(side="left")
+        ttk.Button(theatre_controls, text=tr("数值与来源", "Values & sources"), style="Tiny.TButton",
+                   command=self.show_comparison_sources).pack(side="left", padx=(5, 0))
         replay._tooltip_text = _tr("重播 · 点击画面或按 Esc 跳过")
         self.attach_tooltip(replay)
         picks = ttk.Frame(radar_card, style="Card.TFrame")
+        ttk.Label(theatre_controls.master, text=tr("评分不是准确率；面积不决定胜出。",
+                  "Ratings are not accuracy; polygon area does not decide the winner."),
+                  style="CardTiny.TLabel", wraplength=400).pack(fill="x", pady=(0, 6))
         self.radar_picks = picks
         picks.pack(fill="x")
         tk.Label(picks, text="●", bg=theme.CARD, fg=theme.ACCENT, font=(theme.FONT, 10)).pack(side="left")
@@ -1029,6 +1037,72 @@ class Panel:
         self.radar.show(radar_chart.SCORE_AXES, series, raw)
         self.show_verdict(*verdict_summary(self.plan_result, pair))
 
+    def expand_chart(self):
+        self.render_radar()
+        window = self.tk.Toplevel(self.root)
+        window.title(tr("模型比较", "Model comparison"))
+        window.geometry("900x760")
+        window.minsize(640, 560)
+        window.bind("<Escape>", lambda _e: window.destroy())
+        top = self.ttk.Frame(window, padding=12)
+        top.pack(fill="x")
+        self.ttk.Label(top, text=tr("0–100 为路由评分，不是准确率。面积不决定胜出。",
+                                  "0–100 routing ratings, not accuracy. Polygon area does not determine the winner."),
+                       wraplength=800).pack(anchor="w")
+        for index, series in enumerate(self.radar.series):
+            self.tk.Label(top, text=series["label"], fg=theme.ACCENT if index == 0 else theme.CYAN,
+                          font=(theme.FONT, 11, "bold")).pack(anchor="w", pady=3)
+        self.ttk.Button(top, text=tr("数值与来源", "Values & sources"), command=self.show_comparison_sources).pack(anchor="w")
+        chart = radar_chart.RadarChartCanvas(window, size=600, bg=theme.CARD)
+        chart.pack(fill="both", expand=True, padx=12, pady=12)
+        chart.show(self.radar.axes, self.radar.series, self.radar.raw)
+        window.chart = chart  # retain the renderer until the window is destroyed
+        return window
+
+    def show_comparison_sources(self):
+        import comparison_details
+        if "scoring" in self.built:
+            self.render_radar()
+        allocator, _ = self.data_module().modules()
+        import public_data
+        accounts = allocator.load_accounts()
+        source = public_data.status()
+        source['file'] = str(allocator.fleet_document_path())
+        source['weights'] = accounts.get('scoring', {}).get('weights', {})
+        source['fit_blend'] = accounts.get('scoring', {}).get('profile', {}).get('subjective', {})
+        try:
+            overrides = json.loads(allocator.accounts_override_path().read_text())
+        except (OSError, ValueError):
+            overrides = {}
+        source['overrides'] = {k: v.get('subjective', {}) for k, v in overrides.get('models', {}).items() if isinstance(v, dict)}
+        names = set()
+        if "scoring" in self.built:
+            if self.mode.get() == 'dna':
+                names.update(filter(None, (self.picked(self.pick_a), self.picked(self.pick_b))))
+            else:
+                for row in self.data_module().decision_pair(self.plan_result or {}, self.picked(self.pick_a), self.picked(self.pick_b)):
+                    name = (row.get('bundle') or {}).get('model')
+                    if name:
+                        names.add(name)
+        if getattr(self, 'dna_model', None):
+            names.add(self.dna_model)
+        models = {name: allocator.model_spec(accounts, name) for name in sorted(names)}
+        series = self.radar.series if "scoring" in self.built else []
+        body = comparison_details.describe(series, models, source, self.plan_result if "scoring" in self.built and self.mode.get() == 'score' else None)
+        window = self.tk.Toplevel(self.root)
+        window.title(tr("比较数值与来源", "Comparison values & sources"))
+        window.geometry("860x680")
+        window.minsize(600, 420)
+        from tkinter.scrolledtext import ScrolledText
+        text = ScrolledText(window, wrap="word", font=(theme.FONT, 11), padx=16, pady=16)
+        text.pack(fill="both", expand=True)
+        text.insert("1.0", body)
+        text.configure(state="disabled")
+        self.ttk.Button(window, text=tr("复制说明", "Copy explanation"),
+                        command=lambda: (window.clipboard_clear(), window.clipboard_append(body))).pack(pady=8)
+        window.bind("<Escape>", lambda _e: window.destroy())
+        return window
+
     def verdict_text(self):
         """The verdict as plain text (label: value per line), as the grid shows it for the router's own pair."""
         pair = self.data_module().decision_pair(self.plan_result or {})
@@ -1200,7 +1274,12 @@ class Panel:
         self.status.set(message)
         self.replay_theatre()
 
-    def replay_theatre(self):
+    def replay_theatre(self, force=False):
+        if force:
+            self.theatre_enabled.set(True)
+        if not self.theatre_enabled.get():
+            self.render_radar()
+            return
         if not self.plan_result or not hasattr(self, "theatre"):
             return
         self.radar.canvas.pack_forget()
@@ -1213,8 +1292,10 @@ class Panel:
         self.theatre.play(self.plan_result, self.theatre_enabled.get())
 
     def toggle_theatre(self):
-        if not self.theatre_enabled.get():
-            self.theatre.skip()
+        if self.theatre_enabled.get():
+            self.replay_theatre()
+        else:
+            self.render_radar()
 
     def pick_from_breakdown(self):
         selected = self.breakdown.selection()
@@ -1280,6 +1361,9 @@ class Panel:
         self.quota_updated.pack(side="right", padx=(0, 10))
         self.quota_updated.bind("<Button-1>", lambda _e: self.refresh_usage())
 
+        ttk.Label(page, text=tr("各额度窗口独立限制派发；剩余百分比不是 token 数。过期数据不代表恢复。",
+            "Each quota window can limit dispatch independently. Remaining % is not a token count; stale data does not confirm recovery."),
+            wraplength=900).pack(fill="x", pady=(0, 8))
         self.quota_cols = None
         self._configured_quota_cols = 0
         self._quota_last_w = self._quota_last_h = self._quota_last_bbox = None
@@ -1682,6 +1766,9 @@ class Panel:
     def build_setting_models(self, frame):
         tk, ttk = self.tk, self.ttk
         self.build_cli_toolbar(frame)
+        ttk.Label(frame, text=tr("勾选允许路由；发现模型不代表已启用。推理档位由路由器选择。",
+            "Checked models are allowed for routing. Discovery alone does not enable a model. The router selects reasoning effort."),
+            wraplength=900).pack(fill="x", pady=(6, 0))
         # The priority strip owns its one line; the table scrolls inside the remaining space.
         strip = theme.card(frame, padding=(12, 8), fill="x", side="bottom", pady=(8, 0))
         ttk.Label(strip, text=_tr("临时优先加权"), style="Card.TLabel").pack(side="left", padx=(0, 8))
@@ -2816,6 +2903,10 @@ class Panel:
 
     def build_setting_dna(self, frame):
         tk, ttk = self.tk, self.ttk
+        ttk.Label(frame, text=tr("这些是可编辑的路由判断，不是实测准确率；修改会影响模型选择。",
+            "These editable ratings are routing judgments, not measured accuracy. Changes affect model selection."),
+            wraplength=900).pack(fill="x", pady=(0, 6))
+        ttk.Button(frame, text=tr("数值与来源", "Values & sources"), command=self.show_comparison_sources).pack(anchor="w")
         box = theme.card(frame, padding=10, fill="x", pady=(8, 0))
         box.columnconfigure(1, weight=1)
         box.rowconfigure(0, weight=1)
