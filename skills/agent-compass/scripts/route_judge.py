@@ -2474,6 +2474,9 @@ def main():
     parser.add_argument('--task-id', help='roll: stable id for this task (default: derived from the brief).')
     parser.add_argument('--resume', metavar='AGENT_ID', help='roll: resume this specific idle worker owned by the parent session.')
     parser.add_argument('--new-worker', action='store_true', help='roll: start a fresh worker instead of resuming an idle worker from a previous turn.')
+    parser.add_argument('--execution-mode', choices=('read-only', 'workspace-write'),
+                        help='roll: enforced worker permissions; read-only currently requires Codex.')
+    parser.add_argument('--cli', action='store_true', help='roll: launch locally through a verified CLI adapter.')
     parser.add_argument('--wait', type=float, default=0, help='roll: seconds to wait for the worker (default 0: launch and return).')
     parser.add_argument('--score', action='store_true',
                         help='plan: profile the task first with the System-One scorer (default on plan when objective is present).')

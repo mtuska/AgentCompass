@@ -869,7 +869,7 @@ class RollTests(unittest.TestCase):
         "out = {'argv': sys.argv[1:], 'cwd': os.getcwd(), 'stdin': sys.stdin.read(), 'env': dict(os.environ),\n"
         "       'prompt': open(sys.argv[sys.argv.index('--prompt-file') + 1], encoding='utf-8').read()}\n"
         "open(os.environ['FAKE_GROK_RECORD'], 'w', encoding='utf-8').write(json.dumps(out))\n"
-        "print('grok reply')\n"
+        "print(json.dumps(dict(status='completed', summary='grok reply', deliverable='fixture answer', verification='fixture')))\n"
         "sys.exit(int(os.environ.get('FAKE_GROK_EXIT', '0')))\n")
 
     def grok_roll(self, command, **flags):
@@ -900,18 +900,19 @@ class RollTests(unittest.TestCase):
             with self.subTest(label), patch.dict(os.environ, {'FAKE_GROK_EXIT': exit_code}):
                 result, code = self.grok_roll(command, wait=30)
             record = json.loads((self.root / 'grok-record.json').read_text(encoding='utf-8'))
-            prompt = self.assert_worker_prompt(result, parent='parent-a')
+            prompt = self.assert_worker_prompt(result, parent='parent-a') + __import__('cli_worker').REPORT_CONTRACT
             run_dir = Path(result['worker']['output']).parent
             self.assertEqual((result['launched'], result['dispatch_mode'], code), (True, 'cli', expected))
             self.assertEqual(result['caller_action'], 'already_launched_do_not_respawn')
             self.assertEqual(seen[-1], ('grok', 'grok'))
-            self.assertEqual(record['argv'], ['--always-approve', '-m', 'grok-4.7', '--reasoning-effort', 'high',
+            self.assertEqual(record['argv'], ['-m', 'grok-4.7', '--reasoning-effort', 'high',
                                               '--cwd', str(Path.cwd()), '--prompt-file', str(run_dir / 'brief.md')])
             self.assertEqual((record['cwd'], record['stdin'], record['prompt']), (str(Path.cwd()), '', prompt))
             self.assertEqual(record['env']['GROK_FIXTURE_ACCOUNT'], 'bound')
             self.assertEqual((record['env']['ROUTER_WORKER'], record['env']['ROUTER_PARENT_AGENT_ID']), ('1', 'parent-a'))
             self.assertFalse({'CLAUDECODE', 'CODEX_HOME'} & set(record['env']))
-            self.assertEqual((result['worker']['exit'], result['worker']['reply'].strip()), (int(exit_code), 'grok reply'))
+            self.assertEqual(result['worker']['exit'], int(exit_code))
+            self.assertEqual(json.loads(result['worker']['reply'])['summary'], 'grok reply')
 
     def test_grok_launch_failure_reports_native_handoff_without_a_second_start(self):
         import roll as roll_module
@@ -928,8 +929,10 @@ class RollTests(unittest.TestCase):
                 result, code = self.grok_roll(command, wait=30)
             self.assertEqual((result['launched'], result['dispatch_mode'], code), (False, 'native', 1))
             self.assertIn('worker_prompt_file', result['next'])
-        self.assertEqual(starts, [['grok-missing', '--always-approve', '-m', 'grok-4.7', '--reasoning-effort', 'high',
-                                   '--cwd', str(Path.cwd()), '--prompt-file', starts[0][-1]]])
+        self.assertEqual(len(starts), 1)
+        self.assertTrue(starts[0][1].endswith('cli_worker.py'))
+        spec = json.loads((Path(starts[0][-1]) / 'launch.json').read_text())
+        self.assertEqual(spec['argv'][0], 'grok-missing')
 
     def test_grok_cli_command_uses_the_providers_configured_executable_then_discovery(self):
         import roll as roll_module
@@ -1038,13 +1041,13 @@ class RollTests(unittest.TestCase):
         bundles = allocator.bundles(self.accounts)
         brief = ['--print']
         cases = (('claude-lab via its Paseo definition', 'lab_sonnet55_high', 0,
-                  ['claude', '-p', '--model', 'claude-sonnet-5-5', '--effort', 'high', '--permission-mode', 'bypassPermissions', '--settings', '{"fastMode": false}'],
+                  ['claude', '-p', '--model', 'claude-sonnet-5-5', '--effort', 'high', '--permission-mode', 'acceptEdits', '--settings', '{"fastMode": false}'],
                   'C:/fixture/.claude-lab', self.brief),
                  ('claude does not inherit the caller account', 'sonnet55_high', 5,
-                  ['claude', '-p', '--model', 'claude-sonnet-5-5', '--effort', 'high', '--permission-mode', 'bypassPermissions', '--settings', '{"fastMode": false}'],
+                  ['claude', '-p', '--model', 'claude-sonnet-5-5', '--effort', 'high', '--permission-mode', 'acceptEdits', '--settings', '{"fastMode": false}'],
                   None, self.brief),
                  ('agy takes the brief as its last argument', 'flash_high', 0,
-                  ['agy', '--dangerously-skip-permissions', '--model', bundles['flash_high']['model'], '--add-dir',
+                  ['agy', '--mode', 'auto', '--sandbox', '--model', bundles['flash_high']['model'], '--add-dir',
                    str(Path.cwd())] + brief, None, None))
         for label, choice, wait, argv, config_dir, stdin in cases:
             calls = []
@@ -1053,9 +1056,12 @@ class RollTests(unittest.TestCase):
                 pid = 4242
 
                 def __init__(self, command, stdin=None, stdout=None, env=None, **_):
-                    calls.append({'argv': command, 'env': env,
-                                  'stdin': stdin.read().decode() if hasattr(stdin, 'read') else None})
-                    stdout.write(b'worker reply')
+                    folder = Path(command[-1])
+                    spec = json.loads((folder / 'launch.json').read_text())
+                    calls.append({'argv': spec['argv'], 'env': env,
+                                  'stdin': (folder / 'brief.md').read_text() if spec['stdin'] else None})
+                    (folder / 'output.txt').write_text('worker reply')
+                    (folder / 'result.json').write_text(json.dumps({'status': 'completed', 'exit_code': 0}))
 
                 def wait(self, timeout=None):
                     return 0
@@ -1066,7 +1072,7 @@ class RollTests(unittest.TestCase):
                     patch.object(flow, 'host_call', side_effect=AssertionError('no Paseo')):
                 (result, code), _ = self.roll(decision, parent='', parent_id='parent-a', parent_host='paseo', env=host, wait=wait)
                 self.assertEqual((result['launched'], code), (True, 0))
-                prompt = self.assert_worker_prompt(result, parent='parent-a')
+                prompt = self.assert_worker_prompt(result, parent='parent-a') + __import__('cli_worker').REPORT_CONTRACT
                 self.assertEqual(calls[0]['env']['ROUTER_WORKER'], '1')
                 self.assertEqual(calls[0]['env']['ROUTER_PARENT_AGENT_ID'], 'parent-a')
                 self.assertEqual(calls[0]['argv'], argv + [prompt] if stdin is None else argv)
@@ -1106,8 +1112,11 @@ class RollTests(unittest.TestCase):
             pid = 5151
 
             def __init__(self, command, stdin=None, stdout=None, env=None, **_):
-                calls.append({'argv': command, 'env': env})
-                stdout.write(b'proxy reply')
+                folder = Path(command[-1])
+                spec = json.loads((folder / 'launch.json').read_text())
+                calls.append({'argv': spec['argv'], 'env': env})
+                (folder / 'output.txt').write_text('proxy reply')
+                (folder / 'result.json').write_text(json.dumps({'status': 'completed', 'exit_code': 0}))
 
             def wait(self, timeout=None):
                 return 0

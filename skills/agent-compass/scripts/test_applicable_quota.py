@@ -73,8 +73,8 @@ class ApplicableQuotaTests(unittest.TestCase):
             ({'id':'extra','models':['gpt']},None,True),
             ({'id':'extra','models':['claude']},None,False),
             ({'id':'unknown_scope'},None,True),
-            ({'id':'five_hour'},[],False),
-            ({'id':'five_hour'},['usage'],False),
+            ({'id':'five_hour'},[],True),
+            ({'id':'five_hour'},['usage'],True),
             ({'id':'five_hour'},['five_hour'],True),
         ]
         for window,draws,blocked in cases:

@@ -21,6 +21,10 @@ Long or multi-line assignments: `--task -` reads stdin, `--brief <file>` reads a
 
 `agentcompass` is the only entry and works from any directory; do not run files under `scripts/`. Installed package (`uv tool install` / `pip install`): type it as shown. Source checkout without an install: `python -X utf8 <checkout>/agentcompass roll ...` (the same arguments; your global agent rules spell the absolute path). `agentcompass -h` lists the commands, `agentcompass <command> -h` shows the options of one.
 
+Use `--execution-mode read-only` for reviews and planning that must not edit the project. The router also narrows briefs that explicitly say “read-only” or “read only”. This currently requires the verified Codex sandbox adapter; incompatible providers are excluded. The coordinator saves the returned plan in the worker's unique artifact directory. `--cli` requests local CLI dispatch.
+
+For CLI workers, run `next_argv` to inspect the durable receipt. `completed` means a structured worker report was returned; assess its deliverable and verification before accepting the task. `blocked` and `failed` are terminal results, including invalid reports and quota failures. A zero exit code or an announcement of intended work is not completion.
+
 Read `status` in the result and do exactly `next_action`: `launched` = start nothing else (`next_action` says how the result arrives), `pending` = run `next_argv`, never roll again, `split` = the classifier reads the brief as several separate tasks (`task_count`): split it yourself, roll one brief per independent task and do the coupled ones yourself; if it truly is one assignment, roll it again with `--keep-whole "<why>"` (the daily audit reviews these reasons), `self` / `native` / `blocked` / `error` = follow `next_action`. The full result is at `details` (or print it with `--verbose`).
 
 Optional, only when true (`agentcompass roll -h`): `--hours <n>`, `--local-only "<dependency>"`, `--keep-whole "<reason>"`, `--file <path>`, `--fast`, and for a user-named model `--provider/--account/--model/--effort --basis "<user quote>"`.

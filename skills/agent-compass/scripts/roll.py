@@ -32,23 +32,23 @@ CLI_RUNS_DIR = STATE_DIR / 'cli-workers'
 WORKER_PROMPTS_DIR = STATE_DIR / 'worker-prompts'
 RESULTS_DIR = STATE_DIR / 'roll-results'
 WORKER_COMMUNICATION = SKILLS / 'agent-compass' / 'references' / 'worker-communication.md'
-# Without Paseo, each CLI family runs one routed bundle unattended with full tool access, as Paseo would launch it:
+# Local CLI defaults do not bypass approvals or sandboxing. Read-only dispatch uses the verified Codex adapter:
 # executable and flags for (model, effort, cwd). agy takes its prompt only as the argument after --print; the
 # others read it from stdin; grok reads neither (headless ignores stdin) and takes --prompt-file.
 CLI_RUNS = {
     'claude': ('claude', lambda model, effort, cwd, fast=False: ['-p', '--model', model, *(['--effort', effort] if effort else []),
-                                                                 '--permission-mode', 'bypassPermissions',
+                                                                 '--permission-mode', 'acceptEdits',
                                                                  '--settings', json.dumps({'fastMode': bool(fast)})]),
     'codex': ('codex', lambda model, effort, cwd, fast=False: ['exec', '-m', model,
                                                                *(['-c', f'model_reasoning_effort="{effort}"'] if effort else []),
                                                                '-c', 'features.fast_mode=' + str(bool(fast)).lower(),
                                                                '-c', 'service_tier="priority"' if fast else 'service_tier="default"',
-                                                               '--dangerously-bypass-approvals-and-sandbox',
+                                                               '--sandbox', 'workspace-write', '-c', 'approval_policy="never"',
                                                                '--skip-git-repo-check', '-C', cwd, '-']),
     'pi': ('pi', lambda model, effort, cwd, fast=False: ['-p', '--model', model if '/' in model else f'openai-codex/{model}', *(['--thinking', effort] if effort else [])]),
-    'antigravity-resilient': ('agy', lambda model, effort, cwd, fast=False: ['--dangerously-skip-permissions', '--model', model,
+    'antigravity-resilient': ('agy', lambda model, effort, cwd, fast=False: ['--mode', 'auto', '--sandbox', '--model', model,
                                                                              '--add-dir', cwd, '--print']),
-    'grok': ('grok', lambda model, effort, cwd, fast=False: ['--always-approve', '-m', model,
+    'grok': ('grok', lambda model, effort, cwd, fast=False: ['-m', model,
                                                            *(['--reasoning-effort', effort] if effort else []), '--cwd', cwd]),
     'opencode': ('opencode', lambda model, effort, cwd, fast=False: [
         'run', '-m', model if '/' in model else f'opencode/{model}',
@@ -58,6 +58,14 @@ PROMPT_ARGUMENT = ('antigravity-resilient', 'opencode')
 PROMPT_FILE = ('grok',)
 # The caller's own session and subscription; a CLI worker gets its provider's, never these.
 HOST_SESSION_ENV = ('CLAUDE', 'CODEX_', 'PASEO_AGENT')
+
+
+def execution_mode(args, text):
+    explicit = getattr(args, 'execution_mode', None)
+    readonly = bool(re.search(r'\bread[ -]only\b', text, re.I))
+    if readonly and explicit and explicit != 'read-only':
+        raise ValueError('A read-only brief cannot request broader execution permissions.')
+    return 'read-only' if readonly else (explicit or 'workspace-write')
 
 
 def title_of(text):
@@ -96,6 +104,7 @@ def build_task(args, text, parent):
             task['brief_path'] = str(Path(args.brief).resolve())
         except OSError:
             task['brief_path'] = str(args.brief)
+    task['execution_mode'] = execution_mode(args, text)
     if args.local_only:
         task['needs'] = {'local_only': True, 'local_only_reason': args.local_only}
     if getattr(args, 'file', None) or getattr(args, 'apply_to', None):
@@ -537,8 +546,14 @@ def cli(args, out, bundle, text, judge):
     env.update(provider_env)
     env.update(ROUTER_WORKER='1', ROUTER_PARENT_AGENT_ID=out['parent_id'],
                ROUTER_PARENT_HOST=out['parent_host'], ROUTER_PARENT_ADDRESS=out['parent_address'])
-    run = CLI_RUNS_DIR / f'{time.strftime("%Y%m%d-%H%M%S")}-{bundle["provider"]}-{os.getpid()}'
-    run.mkdir(parents=True, exist_ok=True)
+    mode = 'read-only' if bundle.get('modeId') == 'read-only' else execution_mode(args, text)
+    if mode == 'read-only' and family != 'codex':
+        return dict(out, launched=False, dispatch_mode='none',
+                    next=f'Read-only execution is not verified for {family}; no worker launched.'), 2
+    run = CLI_RUNS_DIR / str(uuid.uuid4())
+    run.mkdir(parents=True, exist_ok=False)
+    import cli_worker
+    text += cli_worker.REPORT_CONTRACT
     (run / 'brief.md').write_bytes(text.encode('utf-8'))
     options = {'creationflags': subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP} \
         if os.name == 'nt' else {'start_new_session': True}
@@ -548,16 +563,27 @@ def cli(args, out, bundle, text, judge):
                 *flags(bundle.get('launch_model') or bundle['model'], bundle.get('effort'), cwd, bool(bundle.get('fast')))]
         if family in PROMPT_FILE:
             argv += ['--prompt-file', str(run / 'brief.md')]
-        with open(run / 'brief.md', 'rb') as brief, open(run / 'output.txt', 'wb') as stdout, \
-                open(run / 'stderr.txt', 'wb') as stderr:
-            process = subprocess.Popen(argv + [text] if prompt_argument else argv, cwd=cwd, env=env,
-                                       stdin=subprocess.DEVNULL if prompt_argument or family in PROMPT_FILE else brief,
-                                       stdout=stdout, stderr=stderr, **options)
+        if family == 'codex':
+            argv[argv.index('--sandbox') + 1] = mode
+            # Do not inherit MCP write tools or user config that weakens the sandbox.
+            argv += ['--ignore-user-config', '--output-last-message', str(run / 'final.json')]
+            (run / 'schema.json').write_text(json.dumps(cli_worker.REPORT_SCHEMA))
+            argv += ['--output-schema', str(run / 'schema.json')]
+        spec = {'argv': argv + [text] if prompt_argument else argv, 'cwd': cwd,
+                'stdin': not (prompt_argument or family in PROMPT_FILE),
+                'account': bundle.get('account'), 'mode': mode, 'family': family}
+        (run / 'launch.json').write_text(json.dumps(spec))
+        with open(run / 'supervisor.log', 'wb') as log:
+            process = subprocess.Popen([sys.executable, str(Path(cli_worker.__file__)), str(run)],
+                                       cwd=cwd, env=env, stdin=subprocess.DEVNULL,
+                                       stdout=log, stderr=log, **options)
     except (RuntimeError, OSError) as exc:
         return dict(out, launched=False, dispatch_mode='native', caller_action='launch_with_native_host_tool',
                     next=f'The {executable} CLI could not start ({exc})' + native), 1
     worker = {'provider': bundle['provider'], 'cli': executable, 'pid': process.pid,
-              'output': str(run / 'output.txt'), 'stderr': str(run / 'stderr.txt')}
+              'output': str(run / 'output.txt'), 'stderr': str(run / 'stderr.txt'),
+              'receipt': str(run / 'result.json'), 'modeId': mode,
+              'continuation_argv': entry.argv('worker', 'status', str(run))}
     try:
         worker['exit'] = process.wait(timeout=args.wait) if args.wait > 0 else None
     except subprocess.TimeoutExpired:
@@ -568,16 +594,18 @@ def cli(args, out, bundle, text, judge):
                     next='No automatic completion notification is installed for this CLI worker. '
                          f'The worker runs as PID {process.pid}; the caller must watch worker.output and worker.stderr. You own this process: '
                          'wait for it, or stop it before you finish.'), 0
+    worker['result'] = json.loads((run / 'result.json').read_text()) if (run / 'result.json').exists() else {'status': 'failed'}
+    worker['exit'] = worker['result'].get('exit_code', worker['exit'])
     worker['reply'] = (run / 'output.txt').read_bytes().decode('utf-8', 'replace')[-6000:]
     return dict(out, launched=True, dispatch_mode='cli', caller_action='already_launched_do_not_respawn',
-                worker=worker), 0 if worker['exit'] == 0 else 1
+                worker=worker), 0 if worker['result']['status'] == 'completed' else 1
 
 
 def status_of(result, code):
     """One plain state from the existing launch fields. Uncertain delivery is pending, never not_launched."""
     mode, action = result.get('dispatch_mode'), result.get('caller_action')
     if result.get('launched') is True:
-        return 'launched'
+        return ((result.get('worker') or {}).get('result') or {}).get('status', 'launched')
     if result.get('launched') is None or action in ('check_delivery_do_not_resend', 'run_next_argv'):
         return 'pending'
     if mode in ('self', 'split', 'scorer_unavailable'):
@@ -596,9 +624,9 @@ def launched_next(result, worker, argv):
         return f"Herdr operation is {worker['state']}; run next_argv to inspect the existing receipt. Nothing new was launched."
     if mode == 'cli':
         if exit_code is None:
-            return (f"Worker is running as PID {worker.get('pid')} and nothing calls back: watch worker_output until it exits, "
-                    'or stop it before you finish.')
-        return 'Worker finished; read worker_output.' if exit_code == 0 else f'Worker exited with code {exit_code}; read worker_output and worker_stderr.'
+            return (f"Worker supervisor is PID {worker.get('pid')}; run next_argv to read its receipt. "
+                    'Wait for terminal status or stop it before you finish.')
+        return f"Worker result is {(worker.get('result') or {}).get('status', 'unknown')}; read worker_receipt and assess its deliverable."
     if (worker.get('completion_notification') or {}).get('status') in ('watching', 'delivered'):
         return 'Worker launched; do not launch another. Its completion arrives as a notification.'
     if argv:
@@ -613,7 +641,7 @@ def compact(result, status, detail_path):
     argv = worker.get('continuation_argv') or result.get('continuation_argv') or result.get('next_argv')
     nxt = {'self': 'Do this task yourself in the current session; do not spawn a subagent.',
            'dry_run': 'Nothing was recorded or launched.'}.get(status) or result.get('next')
-    if status == 'launched':
+    if status == 'launched' or (worker.get('receipt') and status in ('completed', 'blocked', 'failed')):
         nxt = launched_next(result, worker, argv)
     elif status == 'pending' and argv:
         nxt = 'Run next_argv to observe the same operation; do not roll again.'
@@ -633,7 +661,7 @@ def compact(result, status, detail_path):
         out['cause'] = str(cause)[:300]
     if argv and (status == 'pending' or (status == 'launched' and 'next_argv' in (nxt or ''))):
         out['next_argv'] = argv
-    if status == 'launched' and result.get('dispatch_mode') == 'cli':
+    if result.get('dispatch_mode') == 'cli' and result.get('worker'):
         out['worker_output'], out['worker_stderr'] = worker.get('output'), worker.get('stderr')
     if status == 'native':
         out['route_bundle'], out['worker_prompt_file'] = bundle, result.get('worker_prompt_file')
@@ -641,6 +669,9 @@ def compact(result, status, detail_path):
         out['task_count'] = result.get('task_count')
     if result.get('assumptions'):
         out['assumptions'] = result['assumptions']
+    if worker.get('receipt'):
+        out['worker_receipt'] = worker['receipt']
+        out['permission_mode'] = worker.get('modeId')
     out['details'] = detail_path
     return {k: v for k, v in out.items() if v is not None}
 
@@ -728,12 +759,15 @@ def _run(args, judge):
         # The same task already dispatched by this parent: hand back that worker, without classifying or launching again.
         for row in pending_rows:
             if (row['parent_id'], row['task_id']) == (parent, task['task_id']):
+                if task.get('execution_mode') == 'read-only' and (row.get('bundle') or {}).get('modeId') != 'read-only':
+                    return dict(stage='roll', launched=False, dispatch_mode='none',
+                                next='Existing dispatch has incompatible permissions; left untouched. Use --task-id for a distinct read-only task.'), 2
                 argv = entry.argv('launch', '--dispatch-id', row['dispatch_id'], '--parent-id', parent, '--watch-seconds', '120')
                 return dict(stage='roll', parent_id=parent, launched=None, dispatch_mode='paseo',
                             caller_action='run_next_argv', worker=dict(dispatch_flow.public(row), continuation_argv=argv),
                             next='This task already has a dispatch (state ' + row['state'] + '): run next_argv to observe it; '
                                  'it will not create a second worker.'), 0
-        matched_worker = match_reusable_worker(args, task, text, parent)
+        matched_worker = None if task.get('execution_mode') == 'read-only' else match_reusable_worker(args, task, text, parent)
         if matched_worker and matched_worker.get('bundle_id'):
             task['chain'] = {
                 'id': matched_worker['chain_id'],
@@ -796,6 +830,8 @@ def _run(args, judge):
                     next='The router needs a user decision; show route.reason to the user.'), 2
     text, prompt_file = prepare_worker_prompt(text, parent, parent_host, parent_address)
     out['worker_prompt_file'] = str(prompt_file)
+    if task.get('execution_mode') == 'read-only':
+        return cli(args, out, bundle, text, judge)
     if provider == 'dot':
         return dot(args, out, prompt_file)
     if provider == 'chatgpt-web':
@@ -805,6 +841,8 @@ def _run(args, judge):
     if parent_host == 'herdr':
         import host_herdr
         return host_herdr.launch(out, bundle, prompt_file, task['task_id'], judge)
+    if getattr(args, 'cli', False):
+        return cli(args, out, bundle, text, judge)
     if parent_host in NATIVE_HOSTS:
         return dict(out, launched=False, dispatch_mode='native', caller_action='launch_with_native_host_tool',
                     next=native_next(parent_host, bundle, parent_address)), 0

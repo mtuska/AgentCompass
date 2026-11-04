@@ -33,5 +33,5 @@ def command(*args):
     package = package_dir()
     if package is None:
         return ' '.join(['agentcompass', *map(str, args)])
-    return ' '.join(['python', '-X', 'utf8',
+    return ' '.join([shlex.quote(sys.executable), '-X', 'utf8',
                      shlex.quote(package.as_posix()), *map(str, args)])

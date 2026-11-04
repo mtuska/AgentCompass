@@ -1579,6 +1579,7 @@ ANTIGRAVITY_USAGE_RETRY_SECONDS = 8
 
 ANTIGRAVITY_BUCKETS = {
     "gemini-weekly": "gemini 7d",
+    "gemini-argon-wtu-weekly": "Argon 7d",
     "gemini-5h": "gemini 5h",
     "3p-weekly": "claude 7d",
     "3p-5h": "claude 5h",
@@ -1773,7 +1774,7 @@ def _parse_antigravity_usage(payload: Any) -> list[UsageWindow]:
             if not isinstance(bucket, dict) or bucket.get("disabled") is True:
                 continue
             bucket_id = bucket.get("id")
-            if not isinstance(bucket_id, str) or bucket_id not in ANTIGRAVITY_BUCKETS:
+            if not isinstance(bucket_id, str) or not bucket_id:
                 continue
             fraction = bucket.get("remaining_fraction")
             if isinstance(fraction, bool) or not isinstance(fraction, (int, float)):
@@ -1782,12 +1783,13 @@ def _parse_antigravity_usage(payload: Any) -> list[UsageWindow]:
                 continue
             reset = bucket.get("reset_time")
             reset = reset if isinstance(reset, str) and parse_iso(reset) is not None else None
-            window = UsageWindow(bucket_id, ANTIGRAVITY_BUCKETS[bucket_id], (1 - fraction) * 100, reset)
+            window = UsageWindow(bucket_id, ANTIGRAVITY_BUCKETS.get(bucket_id, bucket_id), (1 - fraction) * 100, reset,
+                                 models=["argon"] if bucket_id == "gemini-argon-wtu-weekly" else None)
             if bucket_id not in buckets or window.used_pct > buckets[bucket_id].used_pct:
                 buckets[bucket_id] = window
     if not buckets:
         raise ValueError("Antigravity returned no supported quota buckets")
-    return [buckets[bucket_id] for bucket_id in ANTIGRAVITY_BUCKETS if bucket_id in buckets]
+    return list(buckets.values())
 
 
 def fetch_antigravity_usage() -> ProviderUsage:
@@ -1815,6 +1817,7 @@ def fetch_antigravity_usage() -> ProviderUsage:
                 continue
             cached = cache_get_provider("antigravity")
             if cached is not None:
+                cached.stale = True
                 return cached
             return ProviderUsage("antigravity", "agy", available=False, error="更新失败")
     result = ProviderUsage(

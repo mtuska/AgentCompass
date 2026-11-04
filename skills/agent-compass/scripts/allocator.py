@@ -1631,8 +1631,8 @@ def _explicit_draws(bundle):
 def bundle_pools(bundle, accounts, observed_windows=None):
     """Window ids this bundle draws, in declaration order (configured windows, then observed-only ones).
 
-    An explicit `draws` on the passed bundle wins, including an empty list. Otherwise the catalog
-    bundle's `draws` wins. Otherwise each window's data-declared scope decides (window_scope.binds on the
+    An explicit `draws` on the passed bundle wins for configured pools, including an empty list.
+    Newly observed provider limits still bind by model scope. Otherwise the catalog bundle's `draws` wins. Otherwise each window's data-declared scope decides (window_scope.binds on the
     canonical model): the configured spec's `models`/`models_except` and the reading's own `models`.
     A window no source scopes binds every model, observed-only windows included.
     """
@@ -1656,9 +1656,12 @@ def bundle_pools(bundle, accounts, observed_windows=None):
         catalog = (spec.get('bundles') or {}).get(bid)
         if isinstance(catalog, dict):
             declared = _explicit_draws(catalog)
-    if declared is not None:
-        return [wid for wid in declared if wid in windows]
     model = canonical(bundle.get('model') or '', accounts)
+    if declared is not None:
+        # New provider hard limits cannot disappear behind an older catalog's explicit draws.
+        extra = [wid for wid in observed_windows if wid not in configured
+                 and window_scope.binds(model, {}, observed_windows[wid])]
+        return list(dict.fromkeys([wid for wid in declared if wid in windows] + extra))
     return [wid for wid, wspec in windows.items() if window_scope.binds(model, wspec, observed_windows.get(wid))]
 
 
@@ -1984,6 +1987,13 @@ def evaluate_bundle(bundle, task, ctx):
 
     def exclude(reason):
         result['excluded'].append(reason)
+
+    if task.get('execution_mode') == 'read-only':
+        harness = bundle.get('harness') or bundle_harness(bundle, bundle.get('account'), bundle.get('id'))
+        if harness != 'codex':
+            exclude('read-only execution requires the verified Codex sandbox adapter')
+        else:
+            result['bundle']['modeId'] = 'read-only'
 
     execution_account = accounts_override.preference_account(bundle, bundle['account'], accounts)
     cwd_spec = accounts['accounts'].get(execution_account) or spec
@@ -2709,7 +2719,7 @@ def normalize_task(raw, policy, capabilities, accounts):
                 worker[k] = max(worker.get(k) or 0, v)
             else:
                 worker.setdefault(k, v)
-    return {'kind': kind, 'difficulty': difficulty, 'difficulty_source': source, 'hours': hours,
+    return {'execution_mode': task.get('execution_mode'), 'kind': kind, 'difficulty': difficulty, 'difficulty_source': source, 'hours': hours,
             'profile': profile, 'profile_difficulty': derived, 'divergence': div,
             'requirements': profile_requirements(profile, policy) if profile else None,
             'subjective_weights': subjective_weights({**profile, 'divergence': div}, kind) if profile else None,

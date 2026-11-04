@@ -127,7 +127,9 @@ class UsageSafetyTests(unittest.TestCase):
     def test_single_row_providers_are_fetched_not_confused_with_display_groups(self):
         with patch.object(usage, 'fetch_codex_usage', side_effect=lambda account: self.good(account.provider_id)) as codex, patch.object(
             usage, 'fetch_grok_usage', return_value=self.good('grok')
-        ) as grok, patch.object(usage, 'fetch_api_proxy_usage', return_value=self.good('api-proxy')) as proxy:
+        ) as grok, patch.object(usage, 'fetch_api_proxy_usage', return_value=self.good('api-proxy')) as proxy, patch.object(
+            usage, 'discover_codex_accounts', return_value={a.provider_id: a for a in usage.CODEX_ACCOUNTS}
+        ):
             result = usage.collect_local_usage(['codex', 'codex-2', 'grok', 'api-proxy'])
         self.assertEqual([p.provider_id for p in result], ['codex', 'codex-2', 'grok', 'api-proxy'])
         self.assertEqual(codex.call_count, 2)

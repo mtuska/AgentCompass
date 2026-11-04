@@ -16,7 +16,7 @@ from agentcompass import locations
 
 STAGES = ("roll", "plan", "providers", "score", "scorer", "delegate", "select", "record", "override", "dispatch", "launch")
 
-RUNNERS = {"dot": ("dot-subagent", "run_dot_task.py"), "grok-bot": ("agent-compass", "run_grok_bot.py"),
+RUNNERS = {"worker": ("agent-compass", "cli_worker.py"), "dot": ("dot-subagent", "run_dot_task.py"), "grok-bot": ("agent-compass", "run_grok_bot.py"),
            "herdr": ("agent-compass", "host_herdr.py"),
            "chatgpt-web": ("chatgpt-pro-consult", "consult_bridge.py")}
 
@@ -37,7 +37,7 @@ install and health:
   data        which public reference data routing reads (shipped or fetched); `data --refresh` checks for newer data now
 
 other stages: score, scorer, delegate, select, dispatch, launch
-follow-up of a roll result (its next_argv already spells these): dot status, grok-bot status, chatgpt-web, herdr status
+follow-up of a roll result (its next_argv already spells these): worker status, dot status, grok-bot status, chatgpt-web, herdr status
 Options of one command: agentcompass <command> -h   (every option: --help-all)
 """
 

@@ -34,6 +34,11 @@ def main():
     bindir.mkdir(parents=True, exist_ok=True)
     launcher = bindir / 'agentcompass-tray'
     target = environment / 'bin/agentcompass-tray'
+    # uv tool updates install both console scripts. Restore this package's desktop
+    # entry to its Qt-enabled environment without replacing an unrelated launcher.
+    router_entry = home / '.local/share/uv/tools/agentcompass/bin/agentcompass-tray'
+    if launcher.is_symlink() and launcher.resolve() == router_entry.resolve():
+        launcher.unlink()
     if launcher.exists() or launcher.is_symlink():
         if not launcher.is_symlink() or launcher.readlink() != target:
             parser.error(f'{launcher} already exists and belongs to another installation')
